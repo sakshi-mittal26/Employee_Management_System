@@ -5,70 +5,119 @@ import os
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# load environment variables
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-# MySQL connection (from .env)
 conn = pymysql.connect(
     host=os.getenv("DB_HOST"),
     user=os.getenv("DB_USER"),
     password=os.getenv("DB_PASSWORD"),
-    database=os.getenv("DB_NAME")
+    database="employee_db",
+    cursorclass=pymysql.cursors.DictCursor
 )
 
+# ---------------- HOME ----------------
 @app.route('/')
 def home():
-    return "Server is running!"
+    return "Employee Management System Running 🚀"
+
+# ---------------- EMPLOYEE CRUD ----------------
+
+@app.route('/employees', methods=['GET'])
+def get_employees():
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM employees")
+        data = cursor.fetchall()
+    return jsonify(data)
 
 
-@app.route('/signup', methods=['POST', 'OPTIONS'])
-def signup():
-    if request.method == 'OPTIONS':
-        return '', 200
-
-    data = request.json
-    email = data.get('email')
-    password = data.get('password')
-
-    hashed_password = generate_password_hash(password)
-
-    cursor = conn.cursor()
+@app.route('/employees', methods=['POST'])
+def add_employee():
     try:
+        data = request.get_json()
+        print("RECEIVED:", data)  # 🔥 DEBUG LINE
+
+        if not data:
+            return jsonify({"error": "No JSON received"}), 400
+
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO employees (name, email, position, salary) VALUES (%s, %s, %s, %s)",
+                (
+                    data.get("name"),
+                    data.get("email"),
+                    data.get("position"),
+                    int(data.get("salary"))
+                )
+            )
+            conn.commit()
+
+        return jsonify({"message": "Employee added"}), 201
+
+    except Exception as e:
+        print("ERROR:", e)  # 🔥 SHOW ACTUAL ERROR
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/employees/<int:id>', methods=['PUT'])
+def update_employee(id):
+    data = request.get_json()
+
+    with conn.cursor() as cursor:
         cursor.execute(
-            "INSERT INTO users (email, password) VALUES (%s, %s)",
-            (email, hashed_password)
+            "UPDATE employees SET name=%s, email=%s, position=%s, salary=%s WHERE id=%s",
+            (data["name"], data["email"], data["position"], data["salary"], id)
         )
         conn.commit()
-        return jsonify({"message": "User registered successfully"}), 201
-    except:
-        return jsonify({"message": "User already exists"}), 400
+
+    return jsonify({"message": "Employee updated"})
 
 
-@app.route('/login', methods=['POST', 'OPTIONS'])
+@app.route('/employees/<int:id>', methods=['DELETE'])
+def delete_employee(id):
+    with conn.cursor() as cursor:
+        cursor.execute("DELETE FROM employees WHERE id=%s", (id,))
+        conn.commit()
+
+    return jsonify({"message": "Employee deleted"})
+
+
+
+@app.route('/signup', methods=['POST'])
+def signup():
+    data = request.get_json()
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO users (email, password) VALUES (%s, %s)",
+            (data["email"], generate_password_hash(data["password"]))
+        )
+        conn.commit()
+
+    return jsonify({"message": "User registered"})
+
+
+@app.route('/login', methods=['POST'])
 def login():
-    if request.method == 'OPTIONS':
-        return '', 200
+    data = request.get_json()
 
-    data = request.json
-    email = data.get('email')
-    password = data.get('password')
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT password FROM users WHERE email=%s", (data["email"],))
+        user = cursor.fetchone()
 
-    cursor = conn.cursor()
-    cursor.execute("SELECT password FROM users WHERE email=%s", (email,))
-    user = cursor.fetchone()
+    if user and check_password_hash(user["password"], data["password"]):
+        return jsonify({"message": "Login successful"})
 
-    if user and check_password_hash(user[0], password):
-        return jsonify({"message": "Login successful"}), 200
-    else:
-        return jsonify({"message": "Invalid credentials"}), 401
+    return jsonify({"message": "Invalid credentials"}), 401
 
 
-@app.route('/dashboard')
-def dashboard():
-    return "Welcome to protected page"
+from flask import render_template
+
+@app.route("/employees-ui")
+def employee_ui():
+    return render_template("employee.html")
 
 
 if __name__ == "__main__":
